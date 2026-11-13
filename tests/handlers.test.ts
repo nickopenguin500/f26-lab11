@@ -111,4 +111,74 @@ describe('the refund ledger', () => {
     expect(app.ledger.size()).toBe(0);
     expect(app.gateway.callCount()).toBe(0);
   });
+
+  it('does not double refund or duplicate ledger entries on redelivery', () => {
+    const app = newApp();
+    const booking = aBookingWithRefund(app);
+    const cancellation = app.service.cancel(booking.id);
+    const messageId = cancellation.refundMessageId!;
+
+    app.bus.redeliver(messageId);
+    app.bus.redeliver(messageId);
+
+    expect(app.ledger.forBooking(booking.id)).toHaveLength(1);
+    expect(app.ledger.totalRefundedCents()).toBe(8500);
+    expect(app.gateway.settledFor(booking.id)).toHaveLength(1);
+    expect(app.gateway.totalSettledCents()).toBe(8500);
+    expect(app.gateway.callCount()).toBe(1);
+  });
+
+  it('does not duplicate ledger entries when redelivering after a payment gateway failure', () => {
+    const app = newApp();
+    app.gateway.failOnCall(1);
+    const booking = aBookingWithRefund(app);
+    const cancellation = app.service.cancel(booking.id);
+    const messageId = cancellation.refundMessageId!;
+
+    expect(app.bus.deadLetters()).toHaveLength(1);
+    expect(app.ledger.forBooking(booking.id)).toHaveLength(1);
+    expect(app.gateway.callCount()).toBe(1);
+    expect(app.gateway.settledFor(booking.id)).toHaveLength(0);
+
+    app.bus.redeliver(messageId);
+
+    expect(app.ledger.forBooking(booking.id)).toHaveLength(1);
+    expect(app.ledger.totalRefundedCents()).toBe(8500);
+    expect(app.gateway.settledFor(booking.id)).toHaveLength(1);
+    expect(app.gateway.totalSettledCents()).toBe(8500);
+    expect(app.gateway.callCount()).toBe(2);
+  });
+
+  it('does not duplicate ledger entries across multiple consecutive gateway failures before recovering', () => {
+    const app = newApp();
+    app.gateway.failOnCall(1);
+    const booking = aBookingWithRefund(app);
+    const cancellation = app.service.cancel(booking.id);
+    const messageId = cancellation.refundMessageId!;
+
+    expect(app.bus.deadLetters()).toHaveLength(1);
+    expect(app.ledger.forBooking(booking.id)).toHaveLength(1);
+
+    // Arm second call to fail as well
+    app.gateway.failOnCall(2);
+    app.bus.redeliver(messageId);
+
+    expect(app.bus.deadLetters()).toHaveLength(2);
+    expect(app.ledger.forBooking(booking.id)).toHaveLength(1);
+    expect(app.gateway.callCount()).toBe(2);
+    expect(app.gateway.settledFor(booking.id)).toHaveLength(0);
+
+    // Call 3 succeeds
+    app.bus.redeliver(messageId);
+
+    expect(app.ledger.forBooking(booking.id)).toHaveLength(1);
+    expect(app.ledger.totalRefundedCents()).toBe(8500);
+    expect(app.gateway.settledFor(booking.id)).toHaveLength(1);
+    expect(app.gateway.totalSettledCents()).toBe(8500);
+    expect(app.gateway.callCount()).toBe(3);
+
+    // Subsequent redelivery is a no-op
+    app.bus.redeliver(messageId);
+    expect(app.gateway.callCount()).toBe(3);
+  });
 });
