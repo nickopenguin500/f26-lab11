@@ -67,3 +67,8 @@ paste into `EVENTS.md`. Both print the same output on every run.
 
 See the Lab 11 handout on the course page for the three milestones you show a
 TA.
+
+## Tools and Models
+- Tool: Antigravity
+- Model: Claude 3.7 Sonnet
+- Model: Gemini 3.8 Flash
