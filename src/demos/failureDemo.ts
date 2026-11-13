@@ -34,6 +34,13 @@ function main(): void {
     '\nthe refund message is in the log and in the dead-letter list. ' +
       'Milestone 3 asks what you do with it.',
   );
+
+  if (cancellation.refundMessageId) {
+    console.log(`\nrecovering: redelivering ${cancellation.refundMessageId}`);
+    app.bus.redeliver(cancellation.refundMessageId);
+    printRefundState(app, 'after recovery');
+    printMessageLog(app);
+  }
 }
 
 main();
